@@ -1,82 +1,94 @@
-# bc-permissionset-converter
+# BC Permission Set Converter
 
-Convert Business Central **XML permission set exports** (`PermissionSet` / `TenantPermissionSet`) into **AL `permissionset` objects** you can ship in an extension.
+Turn the permission sets you built in Business Central into AL code, in about two minutes.
 
-Useful when migrating from C/AL or user-defined permission sets to code-based permissions.
+**👉 Use it here:** https://jeffreybulanadi.github.io/bc-permissionset-converter/
 
-## For consultants: no install needed
+Nothing to install. It runs in your browser, and your files never leave your computer.
 
-**Use it online:** https://jeffreybulanadi.github.io/bc-permissionset-converter/ (runs in your browser, files never leave your computer)
+---
 
-Or offline:
+## Why would I need this?
 
-1. Open `web/index.html` in your browser (double-click it).
-2. Drag in your exported XML files.
-3. Drag in the `.app` files from your project's `.alpackages` folder, so the output uses **object names** (`tabledata "G/L Entry"`) instead of IDs. For apps without symbols, add a `.csv` (`50100,My Table`) or `.json` table list.
-4. Set the first object ID, tick the options you want, and click **Download all**.
+You (or your client) built permission sets by hand in Business Central. Now you want them inside your extension, so they're saved with your code and installed with your app.
 
-Your files never leave your computer.
+Doing that by hand means retyping hundreds of lines. This tool does it for you.
 
-## Features
+## How to use it
 
-- One `.al` file per permission set (handles multiple sets per XML file)
-- Direct and indirect permissions (`Yes` → `R`, `Indirect` → `r`) in RIMDX order
-- Respects `Assignable`, escapes captions, sorts permissions by object type and ID
-- Configurable start object ID and name prefix
-- Warns, instead of silently mis-converting, on `Exclude` entries, unsupported types (e.g. MenuSuite) and names longer than 30 characters
-- No dependencies, Python 3.9+
+**1. Export your permission sets from Business Central**
 
-## Usage
+Search for **Permission Sets**, select the ones you want, and choose **Export Permission Sets**. You'll get an XML file.
 
-```bash
-pip install .
-bc-permissionset-converter samples/input -o output --start-id 50100 --prefix "ABC "
-bc-permissionset-converter samples/input --table-execute --custom-tables "50100-50120,50150" --custom-mask RIMD
-bc-permissionset-converter exports/ --table-execute --symbols .alpackages --symbols isv-tables.json
-# or without installing
-python -m bc_permissionset_converter samples/input -o output   # run from src/
-```
+**2. Drop the XML file into the tool**
 
-## Example
+**3. Drop in your `.alpackages` files** *(optional, but you'll want this)*
 
-Input:
-
-```xml
-<TenantPermissionSet RoleID="SALES SUPPORT EXT" RoleName="Sales Support's Ext" Assignable="Yes">
-  <TenantPermission>
-    <ObjectType>Table Data</ObjectType>
-    <ObjectID>18</ObjectID>
-    <ReadPermission>Yes</ReadPermission>
-    <ModifyPermission>Indirect</ModifyPermission>
-  </TenantPermission>
-  ...
-```
-
-Output (`SalesSupportExt.PermissionSet.al`):
+These are the `.app` files in your AL project's `.alpackages` folder. With them, the tool writes real table names instead of numbers:
 
 ```al
-permissionset 50000 "SALES SUPPORT EXT"
+tabledata 17 = RIMD              // without
+tabledata "G/L Entry" = RIMD     // with
+```
+
+Some add-on apps don't include their names. If you see numbers left over, add a simple list like this as a `.csv` file:
+
+```
+50100,My Custom Table
+50101,Another Table
+```
+
+**4. Pick your options and click Download**
+
+- **First object ID**: the number your first permission set should get, for example 50100.
+- **Name prefix**: optional, for example your company's 3-letter prefix.
+- **Also give Execute on the table**: leave it ticked unless you know you don't need it.
+- **Custom tables**: your own table numbers, like `50100-50120`, if you want them added to every permission set.
+
+Copy the downloaded `.al` files into your project, and you're done.
+
+## What you get
+
+```al
+permissionset 50100 "SALES SUPPORT"
 {
-    Caption = 'Sales Support''s Ext';
+    Caption = 'Sales Support', Locked = true;
     Assignable = true;
     Permissions =
-        tabledata 18 = Rm,
-        tabledata 36 = RIMD,
-        page 42 = X;
+        table Customer = X,
+        tabledata Customer = R,
+        table "Sales Header" = X,
+        tabledata "Sales Header" = RIMD,
+        page "Sales Order" = X;
 }
 ```
 
-## Tests
+## Things the tool will warn you about
+
+The tool doesn't hide problems. It tells you when:
+
+- **A line said "Exclude".** AL handles that differently, so the tool skips it and you'll need to set it up yourself.
+- **A line was a MenuSuite.** Those don't exist in AL anymore, so it's safely skipped.
+- **A name was too long.** AL allows 30 characters, so the name was shortened.
+- **A table name couldn't be found.** It stays as a number. Add that app's `.app` file or a `.csv` list to fix it.
+
+---
+
+## For developers
+
+Prefer the command line? There's a Python version with the same features. It needs Python 3.9 or newer and nothing else.
 
 ```bash
-pip install pytest
-pytest
+pip install .
+bc-permissionset-converter my-exports/ --symbols .alpackages --table-execute --start-id 50100
 ```
 
-## Roadmap
+Run `bc-permissionset-converter --help` to see every option. To run the tests: `pip install pytest`, then `pytest`.
 
-- VS Code extension: right-click an XML file → *Convert to AL Permission Set*
+## Coming soon
+
+A VS Code extension: right-click an XML file and choose **Convert to AL Permission Set**.
 
 ## License
 
-MIT
+MIT. Free to use, change and share.
