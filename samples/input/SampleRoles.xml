@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<PermissionSets Version="2.0">
+  <TenantPermissionSet RoleID="SALES SUPPORT EXT" RoleName="Sales Support's Ext" Assignable="Yes">
+    <TenantPermission>
+      <ObjectType>Table Data</ObjectType>
+      <ObjectID>36</ObjectID>
+      <ReadPermission>Yes</ReadPermission>
+      <InsertPermission>Yes</InsertPermission>
+      <ModifyPermission>Yes</ModifyPermission>
+      <DeletePermission>Yes</DeletePermission>
+      <PermissionType>Include</PermissionType>
+    </TenantPermission>
+    <TenantPermission>
+      <ObjectType>Table Data</ObjectType>
+      <ObjectID>18</ObjectID>
+      <ReadPermission>Yes</ReadPermission>
+      <ModifyPermission>Indirect</ModifyPermission>
+      <PermissionType>Include</PermissionType>
+    </TenantPermission>
+    <TenantPermission>
+      <ObjectType>Page</ObjectType>
+      <ObjectID>42</ObjectID>
+      <ExecutePermission>Yes</ExecutePermission>
+      <PermissionType>Include</PermissionType>
+    </TenantPermission>
+    <TenantPermission>
+      <ObjectType>Table Data</ObjectType>
+      <ObjectID>17</ObjectID>
+      <DeletePermission>Yes</DeletePermission>
+      <PermissionType>Exclude</PermissionType>
+    </TenantPermission>
+  </TenantPermissionSet>
+  <TenantPermissionSet RoleID="WAREHOUSE VIEW" RoleName="Warehouse View" Assignable="No">
+    <TenantPermission>
+      <ObjectType>Table Data</ObjectType>
+      <ObjectID>32</ObjectID>
+      <ReadPermission>Yes</ReadPermission>
+      <PermissionType>Include</PermissionType>
+    </TenantPermission>
+    <TenantPermission>
+      <ObjectType>MenuSuite</ObjectType>
+      <ObjectID>1</ObjectID>
+      <ExecutePermission>Yes</ExecutePermission>
+      <PermissionType>Include</PermissionType>
+    </TenantPermission>
+  </TenantPermissionSet>
+</PermissionSets>

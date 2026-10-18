@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Permission Set Converter</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --text: #1b1f24; --muted: #5b6470;
+    --border: #d9dde3; --accent: #0f6cbd; --accent-text: #ffffff;
+    --warn-bg: #fff4ce; --warn-text: #6b4e00; --code-bg: #f1f3f6; --drop: #eaf3fb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #15181c; --card: #1e2227; --text: #e6e9ed; --muted: #9aa3ad;
+      --border: #333a42; --accent: #4ea1e8; --accent-text: #0b1520;
+      --warn-bg: #3d3313; --warn-text: #f2d98a; --code-bg: #171a1e; --drop: #1b2a38;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.5 "Segoe UI", system-ui, sans-serif; }
+  main { max-width: 920px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 24px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+          padding: 20px; margin-bottom: 16px; }
+  .step { font-weight: 600; margin: 0 0 12px; }
+  .step span { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%;
+               background: var(--accent); color: var(--accent-text); font-size: 13px; margin-right: 8px; }
+  .drop { border: 2px dashed var(--border); border-radius: 10px; padding: 32px 16px; text-align: center;
+          cursor: pointer; color: var(--muted); }
+  .drop.over { background: var(--drop); border-color: var(--accent); }
+  #fileList, #symList { margin: 12px 0 0; padding-left: 20px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+  label { display: block; font-weight: 600; margin-bottom: 4px; }
+  .hint { color: var(--muted); font-size: 13px; font-weight: 400; }
+  input[type=text], input[type=number], select, textarea {
+    width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--bg); color: var(--text); font: inherit; }
+  textarea { font-family: Consolas, monospace; font-size: 13px; min-height: 70px; }
+  .check { display: flex; gap: 8px; align-items: flex-start; font-weight: 400; margin-top: 12px; }
+  .check input { margin-top: 4px; }
+  button { padding: 10px 18px; border: 0; border-radius: 6px; background: var(--accent);
+           color: var(--accent-text); font: inherit; font-weight: 600; cursor: pointer; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--border); }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .result { border: 1px solid var(--border); border-radius: 8px; margin-top: 12px; overflow: hidden; }
+  .result header { display: flex; justify-content: space-between; align-items: center; gap: 8px;
+                   padding: 8px 12px; background: var(--code-bg); flex-wrap: wrap; }
+  .result header b { word-break: break-all; }
+  .warn { background: var(--warn-bg); color: var(--warn-text); padding: 6px 12px; font-size: 13px; }
+  pre { margin: 0; padding: 12px; overflow-x: auto; font: 13px/1.45 Consolas, monospace; max-height: 260px; }
+  .empty { color: var(--muted); }
+  footer { color: var(--muted); font-size: 13px; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Permission Set Converter</h1>
+  <p class="sub">Turn Business Central XML permission set exports into AL permission set files.
+    Everything runs in your browser. Nothing is uploaded.</p>
+
+  <section class="card">
+    <p class="step"><span>1</span>Add your XML files</p>
+    <div id="drop" class="drop" tabindex="0">Drag &amp; drop XML files here, or <u>click to browse</u></div>
+    <input id="fileInput" type="file" accept=".xml" multiple hidden>
+    <ul id="fileList"></ul>
+  </section>
+
+  <section class="card">
+    <p class="step"><span>2</span>Use object names instead of IDs <span class="hint">(recommended)</span></p>
+    <p class="hint" style="margin-top:-6px">Drop the <b>.app</b> files from your project's <code>.alpackages</code> folder
+      (Base Application, System, your extensions). For apps without symbols you can also drop a
+      <b>.csv</b> (<code>50100,My Table</code>) or <b>.json</b> (<code>{"50100": "My Table"}</code>) table list.</p>
+    <div id="symDrop" class="drop" tabindex="0">Drag &amp; drop .app / .csv / .json files here, or <u>click to browse</u></div>
+    <input id="symInput" type="file" accept=".app,.csv,.json" multiple hidden>
+    <ul id="symList"></ul>
+  </section>
+
+  <section class="card">
+    <p class="step"><span>3</span>Choose options</p>
+    <div class="grid">
+      <div>
+        <label for="startId">First object ID</label>
+        <input id="startId" type="number" value="50000" min="1">
+        <div class="hint">Each permission set gets the next number.</div>
+      </div>
+      <div>
+        <label for="prefix">Name prefix <span class="hint">(optional)</span></label>
+        <input id="prefix" type="text" placeholder="e.g. ABC ">
+        <div class="hint">Added in front of every permission set name.</div>
+      </div>
+    </div>
+
+    <label class="check"><input id="tableExecute" type="checkbox" checked>
+      <span>Also give <b>Execute</b> on the table for every table data entry
+        <span class="hint">(adds <code>table 18 = X</code> next to <code>tabledata 18 = …</code>)</span></span></label>
+
+    <div class="grid" style="margin-top:16px">
+      <div>
+        <label for="customTables">Custom tables <span class="hint">(optional)</span></label>
+        <input id="customTables" type="text" placeholder="e.g. 50100-50120, 50150">
+        <div class="hint">Your extension's table IDs. Added to every permission set.</div>
+      </div>
+      <div>
+        <label for="customMask">Access for custom tables</label>
+        <select id="customMask">
+          <option value="RIMD">Full (read, insert, modify, delete)</option>
+          <option value="R">Read only</option>
+          <option value="RIM">Read, insert, modify</option>
+          <option value="RIMd">Full, delete indirect</option>
+        </select>
+      </div>
+    </div>
+
+    <details style="margin-top:16px">
+      <summary>Advanced: extra permission lines</summary>
+      <p class="hint">One per line, added to every permission set, e.g. <code>codeunit 50100 = X</code></p>
+      <textarea id="extraLines"></textarea>
+    </details>
+  </section>
+
+  <section class="card">
+    <p class="step"><span>4</span>Download</p>
+    <div class="actions">
+      <button id="downloadZip" disabled>Download all (.zip)</button>
+    </div>
+    <div id="results"><p class="empty">Add XML files to see the result here.</p></div>
+  </section>
+
+  <footer>bc-permissionset-converter · MIT</footer>
+</main>
+
+<script>
+const OBJECT_TYPES = ["tabledata", "table", "report", "codeunit", "xmlport", "page", "query", "system"];
+const FIELDS = [["ReadPermission", "R"], ["InsertPermission", "I"], ["ModifyPermission", "M"],
+                ["DeletePermission", "D"], ["ExecutePermission", "X"]];
+const MAX_NAME = 30;
+const SYMBOL_COLLECTIONS = { Tables: ["table", "tabledata"], Pages: ["page"], Codeunits: ["codeunit"],
+                             Reports: ["report"], Queries: ["query"], XmlPorts: ["xmlport"] };
+let files = [];      // { name, text }
+let outputs = [];    // { fileName, content }
+let symbolSources = [];  // { name, names: Map("type:id" -> name), error }
+
+// First JSON document in a string, ignoring trailing bytes some .app files carry.
+function parseFirstJson(raw) {
+  raw = raw.replace(/^﻿/, "").trimStart();
+  let depth = 0, inString = false;
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw[i];
+    if (inString) { if (c === "\\") i++; else if (c === '"') inString = false; continue; }
+    if (c === '"') inString = true;
+    else if (c === "{" || c === "[") depth++;
+    else if ((c === "}" || c === "]") && --depth === 0) return JSON.parse(raw.slice(0, i + 1));
+  }
+  return JSON.parse(raw);
+}
+
+function collectSymbols(node, names) {
+  for (const [collection, types] of Object.entries(SYMBOL_COLLECTIONS))
+    for (const obj of node[collection] || [])
+      for (const type of types) { const key = `${type}:${obj.Id}`; if (!names.has(key)) names.set(key, obj.Name); }
+  for (const ns of node.Namespaces || []) collectSymbols(ns, names);   // BC24+ namespaces
+}
+
+function readTableList(raw, isJson) {
+  raw = raw.replace(/^﻿/, "");
+  const pairs = isJson ? Object.entries(JSON.parse(raw))
+    : raw.split(/\r?\n/).filter(l => l.includes(",")).map(l => [l.slice(0, l.indexOf(",")), l.slice(l.indexOf(",") + 1)]);
+  const names = new Map();
+  for (let [id, name] of pairs) {
+    id = String(id).trim(); name = String(name).trim().replace(/^"|"$/g, "");
+    if (/^\d+$/.test(id) && name) { names.set(`table:${+id}`, name); names.set(`tabledata:${+id}`, name); }
+  }
+  return names;
+}
+
+async function readSymbolFile(file) {
+  const lower = file.name.toLowerCase();
+  if (!lower.endsWith(".app")) return readTableList(await file.text(), lower.endsWith(".json"));
+  if (typeof JSZip === "undefined") throw new Error("reading .app files needs an internet connection (zip library)");
+  let bytes = new Uint8Array(await file.arrayBuffer());
+  if (String.fromCharCode(...bytes.slice(0, 4)) === "NAVX") bytes = bytes.slice(40);
+  let zip;
+  try { zip = await JSZip.loadAsync(bytes); }
+  catch { throw new Error("no readable symbols (runtime/encrypted package). Add a .csv/.json table list for it instead"); }
+  const entry = zip.file("SymbolReference.json");
+  if (!entry) throw new Error("no SymbolReference.json inside");
+  const names = new Map();
+  collectSymbols(parseFirstJson(await entry.async("string")), names);
+  return names;
+}
+
+function allNames() {
+  const merged = new Map();
+  for (const s of symbolSources) for (const [k, v] of s.names || []) if (!merged.has(k)) merged.set(k, v);
+  return merged;
+}
+
+const quoteName = n => /^[A-Za-z_][A-Za-z0-9_]*$/.test(n) ? n : `"${n}"`;
+
+const $ = id => document.getElementById(id);
+const text = (el, tag) => (el.getElementsByTagName(tag)[0]?.textContent || "").trim();
+
+function buildMask(el) {
+  return FIELDS.map(([tag, letter]) => {
+    const v = text(el, tag).toLowerCase();
+    return v === "yes" ? letter : v === "indirect" ? letter.toLowerCase() : "";
+  }).join("");
+}
+
+function parseIds(input, warnings) {
+  const ids = [];
+  for (const part of input.split(/[,;\s]+/).filter(Boolean)) {
+    const m = part.match(/^(\d+)(?:\s*(?:-|\.\.)\s*(\d+))?$/);
+    if (!m) { warnings.push(`Ignored custom table value '${part}'.`); continue; }
+    const from = +m[1], to = +(m[2] || m[1]);
+    for (let id = Math.min(from, to); id <= Math.max(from, to); id++) ids.push(id);
+  }
+  return ids;
+}
+
+function parseExtraLines(input, warnings) {
+  const result = [];
+  for (const raw of input.split("\n").map(l => l.trim().replace(/[,;]$/, "")).filter(Boolean)) {
+    const m = raw.match(/^(\w+)\s+(\d+)\s*=\s*([RIMDXrimdx]+)$/);
+    if (!m || !OBJECT_TYPES.includes(m[1].toLowerCase())) { warnings.push(`Ignored extra line '${raw}'.`); continue; }
+    result.push({ type: m[1].toLowerCase(), id: +m[2], mask: m[3] });
+  }
+  return result;
+}
+
+function parseXml(xmlText, fileName) {
+  const doc = new DOMParser().parseFromString(xmlText, "application/xml");
+  if (doc.querySelector("parsererror")) return [{ error: `${fileName} is not valid XML.` }];
+  const sets = [...doc.documentElement.children]
+    .filter(e => e.tagName === "PermissionSet" || e.tagName === "TenantPermissionSet");
+  if (!sets.length) return [{ error: `${fileName} has no permission sets.` }];
+
+  return sets.map(setEl => {
+    const set = {
+      roleId: (setEl.getAttribute("RoleID") || "").trim(),
+      roleName: (setEl.getAttribute("RoleName") || "").trim(),
+      assignable: (setEl.getAttribute("Assignable") || "Yes").toLowerCase() !== "no",
+      permissions: [], warnings: []
+    };
+    for (const p of setEl.children) {
+      if (p.tagName !== "Permission" && p.tagName !== "TenantPermission") continue;
+      const rawType = text(p, "ObjectType"), id = text(p, "ObjectID");
+      const type = rawType.replace(/\s/g, "").toLowerCase();
+      if (!OBJECT_TYPES.includes(type)) { set.warnings.push(`Skipped unsupported object type '${rawType}' (ID ${id}).`); continue; }
+      if ((text(p, "PermissionType") || "Include").toLowerCase() === "exclude") {
+        set.warnings.push(`Skipped Exclude entry ${type} ${id}. Handle it with a separate permission set.`); continue;
+      }
+      const mask = buildMask(p);
+      if (mask) set.permissions.push({ type, id: +id, mask });
+    }
+    return set;
+  });
+}
+
+function applyOptions(set, opts) {
+  const has = (type, id) => set.permissions.some(p => p.type === type && p.id === id);
+  for (const id of opts.customTables)
+    if (!has("tabledata", id)) set.permissions.push({ type: "tabledata", id, mask: opts.customMask });
+  for (const line of opts.extraLines)
+    if (!has(line.type, line.id)) set.permissions.push(line);
+  if (opts.tableExecute)
+    for (const p of set.permissions.filter(p => p.type === "tabledata"))
+      if (!has("table", p.id)) set.permissions.push({ type: "table", id: p.id, mask: "X" });
+  if (opts.names.size) {
+    const unresolved = [];
+    for (const p of set.permissions) {
+      p.name = opts.names.get(`${p.type}:${p.id}`);
+      if (!p.name && p.type !== "system") unresolved.push(`${p.type} ${p.id}`);
+    }
+    if (unresolved.length) set.warnings.push(`No name found, kept as ID: ${unresolved.join(", ")}`);
+  }
+  // Tables first (table X right above its tabledata), then other types; by name, then ID.
+  const group = p => (p.type === "table" || p.type === "tabledata") ? 0 : OBJECT_TYPES.indexOf(p.type);
+  set.permissions.sort((a, b) =>
+    group(a) - group(b) || (!a.name) - (!b.name) ||
+    (a.name || "").toLowerCase().localeCompare((b.name || "").toLowerCase()) ||
+    a.id - b.id || (a.type === "table" ? -1 : 1));
+}
+
+function renderAl(set, objectId, prefix) {
+  const name = (prefix + set.roleId).replace(/"/g, "").slice(0, MAX_NAME);
+  const caption = (set.roleName || set.roleId).replace(/'/g, "''");
+  const lines = [`permissionset ${objectId} "${name}"`, "{", `    Caption = '${caption}', Locked = true;`,
+                 `    Assignable = ${set.assignable};`];
+  if (set.permissions.length) {
+    lines.push("    Permissions =");
+    lines.push(set.permissions.map(p => `        ${p.type} ${p.name ? quoteName(p.name) : p.id} = ${p.mask}`).join(",\n") + ";");
+  }
+  lines.push("}");
+  return lines.join("\n") + "\n";
+}
+
+function toFileName(roleId, used) {
+  const stem = roleId.split(/[^A-Za-z0-9]+/).filter(Boolean)
+    .map(w => w[0].toUpperCase() + w.slice(1).toLowerCase()).join("") || "PermissionSet";
+  let name = `${stem}.PermissionSet.al`, n = 2;
+  while (used.has(name)) name = `${stem}${n++}.PermissionSet.al`;
+  used.add(name);
+  return name;
+}
+
+function convertAll() {
+  const globalWarnings = [];
+  const opts = {
+    customTables: parseIds($("customTables").value, globalWarnings),
+    customMask: $("customMask").value,
+    extraLines: parseExtraLines($("extraLines").value, globalWarnings),
+    tableExecute: $("tableExecute").checked,
+    names: allNames()
+  };
+  const prefix = $("prefix").value;
+  let nextId = parseInt($("startId").value, 10) || 50000;
+  const used = new Set();
+  outputs = [];
+  const results = $("results");
+  results.innerHTML = "";
+
+  if (globalWarnings.length) results.append(warnBox(globalWarnings));
+  if (!files.length) { results.innerHTML += '<p class="empty">Add XML files to see the result here.</p>'; }
+
+  for (const f of files) {
+    for (const set of parseXml(f.text, f.name)) {
+      if (set.error) { results.append(warnBox([set.error])); continue; }
+      applyOptions(set, opts);
+      if ((prefix + set.roleId).length > MAX_NAME) set.warnings.push(`Name shortened to ${MAX_NAME} characters (AL limit).`);
+      const out = { fileName: toFileName(set.roleId, used), content: renderAl(set, nextId++, prefix) };
+      outputs.push(out);
+      results.append(resultBox(out, set));
+    }
+  }
+  $("downloadZip").disabled = !outputs.length;
+}
+
+function warnBox(messages) {
+  const div = document.createElement("div");
+  div.className = "warn";
+  div.textContent = messages.join("  •  ");
+  return div;
+}
+
+function resultBox(out, set) {
+  const box = document.createElement("div");
+  box.className = "result";
+  const header = document.createElement("header");
+  const title = document.createElement("b");
+  title.textContent = `${out.fileName} · ${set.permissions.length} permissions`;
+  const actions = document.createElement("div");
+  actions.className = "actions";
+  const copy = Object.assign(document.createElement("button"), { className: "secondary", textContent: "Copy" });
+  copy.onclick = () => navigator.clipboard.writeText(out.content).then(() => { copy.textContent = "Copied"; setTimeout(() => copy.textContent = "Copy", 1200); });
+  const dl = Object.assign(document.createElement("button"), { className: "secondary", textContent: "Download" });
+  dl.onclick = () => saveBlob(new Blob([out.content], { type: "text/plain" }), out.fileName);
+  actions.append(copy, dl);
+  header.append(title, actions);
+  box.append(header);
+  if (set.warnings.length) box.append(warnBox(set.warnings));
+  const pre = document.createElement("pre");
+  pre.textContent = out.content;
+  box.append(pre);
+  return box;
+}
+
+function saveBlob(blob, name) {
+  const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: name });
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+$("downloadZip").onclick = async () => {
+  if (typeof JSZip === "undefined") {   // offline: fall back to individual files
+    outputs.forEach(o => saveBlob(new Blob([o.content], { type: "text/plain" }), o.fileName));
+    return;
+  }
+  const zip = new JSZip();
+  outputs.forEach(o => zip.file(o.fileName, o.content));
+  saveBlob(await zip.generateAsync({ type: "blob" }), "PermissionSets.zip");
+};
+
+async function addFiles(list) {
+  for (const file of list) {
+    if (!file.name.toLowerCase().endsWith(".xml")) continue;
+    files = files.filter(f => f.name !== file.name);
+    files.push({ name: file.name, text: await file.text() });
+  }
+  $("fileList").innerHTML = "";
+  for (const f of files) {
+    const li = document.createElement("li");
+    li.textContent = f.name + " ";
+    const rm = Object.assign(document.createElement("a"), { href: "#", textContent: "remove" });
+    rm.onclick = e => { e.preventDefault(); files = files.filter(x => x !== f); addFiles([]); };
+    li.append(rm);
+    $("fileList").append(li);
+  }
+  convertAll();
+}
+
+async function addSymbols(list) {
+  for (const file of list) {
+    if (!/\.(app|csv|json)$/i.test(file.name)) continue;
+    symbolSources = symbolSources.filter(s => s.name !== file.name);
+    const source = { name: file.name, names: null, error: null };
+    symbolSources.push(source);
+    try { source.names = await readSymbolFile(file); } catch (e) { source.error = e.message; }
+  }
+  $("symList").innerHTML = "";
+  for (const s of symbolSources) {
+    const li = document.createElement("li");
+    li.textContent = s.error ? `${s.name}: ${s.error} ` : `${s.name} (${s.names.size} names) `;
+    if (s.error) li.style.color = "var(--warn-text)";
+    const rm = Object.assign(document.createElement("a"), { href: "#", textContent: "remove" });
+    rm.onclick = e => { e.preventDefault(); symbolSources = symbolSources.filter(x => x !== s); addSymbols([]); };
+    li.append(rm);
+    $("symList").append(li);
+  }
+  convertAll();
+}
+
+function wireDrop(dropId, inputId, handler) {
+  const drop = $(dropId), input = $(inputId);
+  drop.onclick = () => input.click();
+  drop.onkeydown = e => { if (e.key === "Enter" || e.key === " ") input.click(); };
+  input.onchange = e => { handler(e.target.files); e.target.value = ""; };
+  drop.ondragover = e => { e.preventDefault(); drop.classList.add("over"); };
+  drop.ondragleave = () => drop.classList.remove("over");
+  drop.ondrop = e => { e.preventDefault(); drop.classList.remove("over"); handler(e.dataTransfer.files); };
+}
+wireDrop("drop", "fileInput", addFiles);
+wireDrop("symDrop", "symInput", addSymbols);
+["startId", "prefix", "tableExecute", "customTables", "customMask", "extraLines"]
+  .forEach(id => $(id).addEventListener("input", convertAll));
+</script>
+</body>
+</html>

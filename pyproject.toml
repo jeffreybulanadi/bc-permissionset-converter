@@ -1,0 +1,18 @@
+[project]
+name = "bc-permissionset-converter"
+version = "1.0.0"
+description = "Convert Business Central XML permission sets to AL permissionset objects"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Jeffrey Bulanadi" }]
+requires-python = ">=3.9"
+
+[project.scripts]
+bc-permissionset-converter = "bc_permissionset_converter.__main__:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
