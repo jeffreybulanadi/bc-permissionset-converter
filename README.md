@@ -2,7 +2,7 @@
 
 Turn the permission sets you built in Business Central into AL code, in about two minutes.
 
-**👉 Use it here:** https://jeffreybulanadi.github.io/bc-permissionset-converter/
+**Use it here:** https://jeffreybulanadi.github.io/bc-permissionset-converter/
 
 Nothing to install. It runs in your browser, and your files never leave your computer.
 
