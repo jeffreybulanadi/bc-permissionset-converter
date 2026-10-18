@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
@@ -104,6 +106,49 @@ def parse_permission(element: ET.Element, warnings: list[str]) -> Permission | N
     return Permission(object_type, int(raw_id), mask)
 
 
+CSV_PERMISSION_COLUMNS = [f"{tag[:-len('Permission')]} Permission" for tag, _ in PERMISSION_FIELDS]
+
+
+def parse_csv(csv_path: Path) -> list[PermissionSet]:
+    """Parse a permission set exported from the BC Permissions page to Excel/CSV.
+
+    One permission set per file, named after the file. Columns: Object Type, Object ID,
+    Object Name, Read/Insert/Modify/Delete/Execute Permission.
+    """
+    text = csv_path.read_text(encoding="utf-8-sig")
+    header = text.splitlines()[0] if text else ""
+    delimiter = max([",", ";", "\t"], key=header.count)
+    rows = csv.DictReader(io.StringIO(text), delimiter=delimiter)
+    rows.fieldnames = [(f or "").strip() for f in rows.fieldnames or []]
+    if "Object Type" not in rows.fieldnames or "Object ID" not in rows.fieldnames:
+        raise ValueError(f"{csv_path.name} does not look like a permission set export "
+                         "(needs 'Object Type' and 'Object ID' columns).")
+
+    name = csv_path.stem.strip()
+    permission_set = PermissionSet(role_id=name.upper(), role_name=name, assignable=True)
+    for row in rows:
+        raw_type = (row.get("Object Type") or "").strip()
+        raw_id = (row.get("Object ID") or "").strip()
+        if not raw_type and not raw_id:
+            continue
+        object_type = OBJECT_TYPES.get(raw_type.replace(" ", "").lower())
+        if object_type is None or not raw_id.isdigit():
+            permission_set.warnings.append(f"Skipped unsupported line '{raw_type} {raw_id}'.")
+            continue
+        mask = ""
+        for column, (_, letter) in zip(CSV_PERMISSION_COLUMNS, PERMISSION_FIELDS):
+            value = (row.get(column) or "").strip().lower()
+            mask += letter if value == "yes" else letter.lower() if value == "indirect" else ""
+        if mask:
+            object_name = (row.get("Object Name") or "").strip() or None
+            permission_set.permissions.append(Permission(object_type, int(raw_id), mask, object_name))
+    return [permission_set]
+
+
+def parse_file(path: Path) -> list[PermissionSet]:
+    return parse_csv(path) if path.suffix.lower() == ".csv" else parse_xml(path)
+
+
 def parse_xml(xml_path: Path) -> list[PermissionSet]:
     """Parse every PermissionSet / TenantPermissionSet in an exported XML file."""
     root = ET.parse(xml_path).getroot()
@@ -177,27 +222,26 @@ def apply_options(
     """Add custom tables, optionally 'table N = X' for every tabledata entry, and resolve object names."""
     existing = {(p.object_type, p.object_id) for p in permission_set.permissions}
 
-    def add(object_type: str, object_id: int, mask: str) -> None:
+    def add(object_type: str, object_id: int, mask: str, name: str | None = None) -> None:
         if (object_type, object_id) not in existing:
             existing.add((object_type, object_id))
-            permission_set.permissions.append(Permission(object_type, object_id, mask))
+            permission_set.permissions.append(Permission(object_type, object_id, mask, name))
 
     for table_id in custom_tables:
         add("tabledata", table_id, custom_mask)
     if table_execute:
         for p in [p for p in permission_set.permissions if p.object_type == "tabledata"]:
-            add("table", p.object_id, "X")
+            add("table", p.object_id, "X", p.name)
 
-    if names:
-        unresolved = []
-        for p in permission_set.permissions:
-            p.name = names.get((p.object_type, p.object_id))
-            if p.name is None and p.object_type != "system":
-                unresolved.append(f"{p.object_type} {p.object_id}")
-        if unresolved:
-            permission_set.warnings.append(
-                "No name found in symbols, kept as ID: " + ", ".join(unresolved)
-            )
+    # Symbols win; a name that came with the file (CSV exports) is the fallback.
+    names = names or {}
+    unresolved = []
+    for p in permission_set.permissions:
+        p.name = names.get((p.object_type, p.object_id)) or p.name
+        if p.name is None and p.object_type != "system":
+            unresolved.append(f"{p.object_type} {p.object_id}")
+    if unresolved and (names or any(p.name for p in permission_set.permissions)):
+        permission_set.warnings.append("No name found, kept as ID: " + ", ".join(unresolved))
 
     permission_set.permissions.sort(key=Permission.sort_key)
 
@@ -212,12 +256,12 @@ def convert(
     table_execute: bool = False,
     names: dict[tuple[str, int], str] | None = None,
 ) -> list[tuple[Path, PermissionSet]]:
-    """Convert XML files to AL files. Returns (written file, permission set) pairs."""
+    """Convert XML/CSV files to AL files. Returns (written file, permission set) pairs."""
     output_dir.mkdir(parents=True, exist_ok=True)
     written = []
     next_id = start_id
-    for xml_path in inputs:
-        for permission_set in parse_xml(xml_path):
+    for input_path in inputs:
+        for permission_set in parse_file(input_path):
             apply_options(permission_set, custom_tables or [], custom_mask, table_execute, names)
             if len(permission_set.role_id) + len(prefix) > MAX_NAME_LENGTH:
                 permission_set.warnings.append(

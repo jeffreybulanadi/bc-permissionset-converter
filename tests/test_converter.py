@@ -102,3 +102,37 @@ def test_custom_table_lists(tmp_path):
 
 def test_file_name():
     assert to_file_name("SALES ORDER-ENTRY") == "SalesOrderEntry.PermissionSet.al"
+
+
+CSV_SAMPLE = SAMPLE.parent / "Accounts Payable.csv"
+
+
+def test_csv_export_uses_names_from_file(tmp_path):
+    written = convert([CSV_SAMPLE], tmp_path, table_execute=True)
+    path, permission_set = written[0]
+    assert path.name == "AccountsPayable.PermissionSet.al"
+    assert not permission_set.warnings
+    body = path.read_text().split("Permissions =\n")[1]
+    assert body == (
+        "        table Customer = X,\n"
+        "        tabledata Customer = R,\n"
+        "        table Vendor = X,\n"
+        "        tabledata Vendor = RIMD,\n"
+        '        table "Vendor Ledger Entry" = X,\n'
+        '        tabledata "Vendor Ledger Entry" = Rim,\n'
+        '        page "Vendor Card" = X;\n'
+        "}\n"
+    )
+
+
+def test_csv_semicolon_and_bad_file(tmp_path):
+    good = tmp_path / "Sales.csv"
+    good.write_text("Object Type;Object ID;Object Name;Read Permission\nTable Data;36;Sales Header;Yes\n")
+    assert "tabledata \"Sales Header\" = R" in convert([good], tmp_path / "o")[0][0].read_text()
+    bad = tmp_path / "Other.csv"
+    bad.write_text("a,b\n1,2\n")
+    try:
+        convert([bad], tmp_path / "o2")
+        assert False, "expected ValueError"
+    except ValueError as error:
+        assert "Object Type" in str(error)

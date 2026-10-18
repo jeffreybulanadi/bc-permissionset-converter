@@ -20,7 +20,9 @@ Doing that by hand means retyping hundreds of lines. This tool does it for you.
 
 Search for **Permission Sets**, select the ones you want, and choose **Export Permission Sets**. You'll get an XML file.
 
-**2. Drop the XML file into the tool**
+Got them in Excel instead? That works too. Open a permission set, export its permissions to Excel, and save it as a `.csv` file. Each CSV becomes one permission set, named after the file, so name the file the way you want the permission set to be called.
+
+**2. Drop the XML or CSV files into the tool**
 
 **3. Drop in your `.alpackages` files** *(optional, but you'll want this)*
 

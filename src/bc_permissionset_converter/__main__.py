@@ -10,16 +10,16 @@ from .symbols import load_symbols
 
 def collect_inputs(path: Path) -> list[Path]:
     if path.is_dir():
-        return sorted(path.glob("*.xml"))
+        return sorted(p for p in path.iterdir() if p.suffix.lower() in (".xml", ".csv"))
     return [path]
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="bc-permissionset-converter",
-        description="Convert Business Central XML permission sets to AL permissionset objects.",
+        description="Convert Business Central XML/CSV permission sets to AL permissionset objects.",
     )
-    parser.add_argument("input", type=Path, help="XML file or folder of XML files")
+    parser.add_argument("input", type=Path, help="XML/CSV file, or a folder of them")
     parser.add_argument("-o", "--output", type=Path, default=Path("output"), help="output folder (default: ./output)")
     parser.add_argument("--start-id", type=int, default=50000, help="first object ID (default: 50000)")
     parser.add_argument("--prefix", default="", help="object name prefix, e.g. 'ABC '")
@@ -32,7 +32,7 @@ def main(argv: list[str] | None = None) -> int:
 
     inputs = collect_inputs(args.input)
     if not inputs:
-        print(f"No XML files found in {args.input}", file=sys.stderr)
+        print(f"No XML or CSV files found in {args.input}", file=sys.stderr)
         return 1
 
     try:
@@ -48,10 +48,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"warning: {error}")
         print(f"Loaded {len(names)} object names from symbols")
 
-    results = convert(
-        inputs, args.output, args.start_id, args.prefix,
-        custom_tables, args.custom_mask, args.table_execute, names,
-    )
+    try:
+        results = convert(
+            inputs, args.output, args.start_id, args.prefix,
+            custom_tables, args.custom_mask, args.table_execute, names,
+        )
+    except ValueError as error:
+        print(error, file=sys.stderr)
+        return 1
     for target, permission_set in results:
         print(f"{target}  ({len(permission_set.permissions)} permissions)")
         for warning in permission_set.warnings:

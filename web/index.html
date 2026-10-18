@@ -60,13 +60,14 @@
 <body>
 <main>
   <h1>Permission Set Converter</h1>
-  <p class="sub">Turn Business Central XML permission set exports into AL permission set files.
+  <p class="sub">Turn Business Central permission set exports (XML or CSV) into AL permission set files.
     Everything runs in your browser. Nothing is uploaded.</p>
 
   <section class="card">
-    <p class="step"><span>1</span>Add your XML files</p>
-    <div id="drop" class="drop" tabindex="0">Drag &amp; drop XML files here, or <u>click to browse</u></div>
-    <input id="fileInput" type="file" accept=".xml" multiple hidden>
+    <p class="step"><span>1</span>Add your permission set files</p>
+    <p class="hint" style="margin-top:-6px">An <b>XML</b> file from <b>Export Permission Sets</b>, or a <b>CSV</b> exported to Excel from a permission set's Permissions page. A CSV becomes one permission set named after the file.</p>
+    <div id="drop" class="drop" tabindex="0">Drag &amp; drop XML or CSV files here, or <u>click to browse</u></div>
+    <input id="fileInput" type="file" accept=".xml,.csv" multiple hidden>
     <ul id="fileList"></ul>
   </section>
 
@@ -233,6 +234,55 @@ function parseExtraLines(input, warnings) {
   return result;
 }
 
+// Minimal CSV reader: handles quoted values with commas or doubled quotes.
+function parseCsvRows(raw, delimiter) {
+  const rows = [];
+  let row = [], value = "", quoted = false;
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw[i];
+    if (quoted) {
+      if (c === '"' && raw[i + 1] === '"') { value += '"'; i++; }
+      else if (c === '"') quoted = false;
+      else value += c;
+    } else if (c === '"') quoted = true;
+    else if (c === delimiter) { row.push(value); value = ""; }
+    else if (c === "\n" || c === "\r") {
+      if (c === "\r" && raw[i + 1] === "\n") i++;
+      row.push(value); rows.push(row); row = []; value = "";
+    } else value += c;
+  }
+  if (value || row.length) { row.push(value); rows.push(row); }
+  return rows;
+}
+
+// A permission set exported from the BC Permissions page to Excel/CSV: one set per file.
+function parseCsv(raw, fileName) {
+  raw = raw.replace(/^﻿/, "");
+  const firstLine = raw.split(/\r?\n/)[0] || "";
+  const delimiter = [",", ";", "\t"].reduce((a, b) => firstLine.split(b).length > firstLine.split(a).length ? b : a);
+  const [header = [], ...rows] = parseCsvRows(raw, delimiter);
+  const col = name => header.findIndex(h => h.trim().toLowerCase() === name.toLowerCase());
+  const typeCol = col("Object Type"), idCol = col("Object ID"), nameCol = col("Object Name");
+  if (typeCol < 0 || idCol < 0)
+    return [{ error: `${fileName} does not look like a permission set export (needs "Object Type" and "Object ID" columns).` }];
+  const permCols = FIELDS.map(([tag, letter]) => [col(tag.replace("Permission", " Permission")), letter]);
+
+  const title = fileName.replace(/\.csv$/i, "").trim();
+  const set = { roleId: title.toUpperCase(), roleName: title, assignable: true, permissions: [], warnings: [] };
+  for (const r of rows) {
+    const rawType = (r[typeCol] || "").trim(), id = (r[idCol] || "").trim();
+    if (!rawType && !id) continue;
+    const type = rawType.replace(/\s/g, "").toLowerCase();
+    if (!OBJECT_TYPES.includes(type) || !/^\d+$/.test(id)) { set.warnings.push(`Skipped unsupported line '${rawType} ${id}'.`); continue; }
+    const mask = permCols.map(([i, letter]) => {
+      const v = i < 0 ? "" : (r[i] || "").trim().toLowerCase();
+      return v === "yes" ? letter : v === "indirect" ? letter.toLowerCase() : "";
+    }).join("");
+    if (mask) set.permissions.push({ type, id: +id, mask, name: nameCol < 0 ? undefined : (r[nameCol] || "").trim() || undefined });
+  }
+  return [set];
+}
+
 function parseXml(xmlText, fileName) {
   const doc = new DOMParser().parseFromString(xmlText, "application/xml");
   if (doc.querySelector("parsererror")) return [{ error: `${fileName} is not valid XML.` }];
@@ -267,18 +317,18 @@ function applyOptions(set, opts) {
   for (const id of opts.customTables)
     if (!has("tabledata", id)) set.permissions.push({ type: "tabledata", id, mask: opts.customMask });
   for (const line of opts.extraLines)
-    if (!has(line.type, line.id)) set.permissions.push(line);
+    if (!has(line.type, line.id)) set.permissions.push({ ...line });
   if (opts.tableExecute)
     for (const p of set.permissions.filter(p => p.type === "tabledata"))
-      if (!has("table", p.id)) set.permissions.push({ type: "table", id: p.id, mask: "X" });
-  if (opts.names.size) {
-    const unresolved = [];
-    for (const p of set.permissions) {
-      p.name = opts.names.get(`${p.type}:${p.id}`);
-      if (!p.name && p.type !== "system") unresolved.push(`${p.type} ${p.id}`);
-    }
-    if (unresolved.length) set.warnings.push(`No name found, kept as ID: ${unresolved.join(", ")}`);
+      if (!has("table", p.id)) set.permissions.push({ type: "table", id: p.id, mask: "X", name: p.name });
+  // Symbols win; a name that came with the file (CSV exports) is the fallback.
+  const unresolved = [];
+  for (const p of set.permissions) {
+    p.name = opts.names.get(`${p.type}:${p.id}`) || p.name;
+    if (!p.name && p.type !== "system") unresolved.push(`${p.type} ${p.id}`);
   }
+  if (unresolved.length && (opts.names.size || set.permissions.some(p => p.name)))
+    set.warnings.push(`No name found, kept as ID: ${unresolved.join(", ")}`);
   // Tables first (table X right above its tabledata), then other types; by name, then ID.
   const group = p => (p.type === "table" || p.type === "tabledata") ? 0 : OBJECT_TYPES.indexOf(p.type);
   set.permissions.sort((a, b) =>
@@ -329,7 +379,7 @@ function convertAll() {
   if (!files.length) { results.innerHTML += '<p class="empty">Add XML files to see the result here.</p>'; }
 
   for (const f of files) {
-    for (const set of parseXml(f.text, f.name)) {
+    for (const set of (/\.csv$/i.test(f.name) ? parseCsv : parseXml)(f.text, f.name)) {
       if (set.error) { results.append(warnBox([set.error])); continue; }
       applyOptions(set, opts);
       if ((prefix + set.roleId).length > MAX_NAME) set.warnings.push(`Name shortened to ${MAX_NAME} characters (AL limit).`);
@@ -388,7 +438,7 @@ $("downloadZip").onclick = async () => {
 
 async function addFiles(list) {
   for (const file of list) {
-    if (!file.name.toLowerCase().endsWith(".xml")) continue;
+    if (!/\.(xml|csv)$/i.test(file.name)) continue;
     files = files.filter(f => f.name !== file.name);
     files.push({ name: file.name, text: await file.text() });
   }

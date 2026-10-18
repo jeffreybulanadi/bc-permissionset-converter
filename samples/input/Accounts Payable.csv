@@ -1,0 +1,5 @@
+Object Type,Object ID,Object Name,Read Permission,Insert Permission,Modify Permission,Delete Permission,Execute Permission,Security Filter
+Table Data,18,Customer,Yes, , , , ,
+Table Data,23,Vendor,Yes,Yes,Yes,Yes, ,
+Table Data,25,Vendor Ledger Entry,Yes,Indirect,Indirect, , ,
+Page,26,Vendor Card, , , , ,Yes,
